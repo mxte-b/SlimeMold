@@ -1,0 +1,78 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Move
+#pragma kernel Evaporate
+
+#define RAND_MAX 4294967295.0
+#define PI 3.14159
+
+int width;
+int height;
+float deltaTime;
+
+int agentCount;
+float moveSpeed;
+float evaporateSpeed;
+
+struct Agent
+{
+    float2 Position;
+    float Angle;
+};
+
+RWTexture2D<float4> Result;
+RWTexture2D<float4> Evaporated;
+RWStructuredBuffer<Agent> Agents;
+
+uint hash(uint state)
+{
+    state ^= 2747636419u;
+    state *= 2654435769u;
+    state ^= state >> 16;
+    state *= 2654435769u;
+    state ^= state >> 16;
+    state *= 2654435769u;
+    return state;
+}
+
+float random(float2 co)
+{
+    return frac(sin(dot(co, float2(12.9898, 78.233))) * 43758.5453);
+}
+
+[numthreads(16,1,1)]
+void Move (uint3 id : SV_DispatchThreadID)
+{
+    if (id.x > (uint)agentCount)
+    {
+        return;
+    }
+    
+    Agent agent = Agents[id.x];
+
+    
+    float2 direction = float2(cos(agent.Angle), sin(agent.Angle));
+    float2 newPosition = agent.Position + direction * moveSpeed * deltaTime;
+    
+    // Boundary checking
+    if (newPosition.x <= 0 || newPosition.x >= width || newPosition.y <= 0 || newPosition.y >= height)
+    {
+        newPosition.x = clamp(newPosition.x, 0, width - 1.1);
+        newPosition.y = clamp(newPosition.y, 0, height - 1.1);
+        
+        float angleRand = random(float2(agent.Position.xy + deltaTime * id.x));
+        Agents[id.x].Angle = angleRand * 2.0 * PI;
+    }
+    
+    Agents[id.x].Position = newPosition;
+    
+    Result[int2(newPosition.x, newPosition.y)] = float4(1.0, 1.0, 1.0, 1.0);
+}
+
+[numthreads(8,8,1)]
+void Evaporate(uint3 id : SV_DispatchThreadID)
+{
+    float4 originalValue = Result[id.xy];
+    float4 evaporatedValue = max(0, originalValue - evaporateSpeed * deltaTime);
+    evaporatedValue.w = 1.0;
+    Evaporated[id.xy] = evaporatedValue;
+}
