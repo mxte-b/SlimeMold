@@ -1,14 +1,25 @@
-using System.Collections;
+﻿using System.Collections;
 using System.Collections.Generic;
+using System.Runtime.InteropServices.WindowsRuntime;
 using UnityEngine;
 using UnityEngine.UI;
 
 public class SlimeController : MonoBehaviour
 {
     [Header("Simulation")]
-    public int AgentCount = 10;
-    public float MoveSpeed = 10;
-    public float EvaporateSpeed = 1;
+    public int AgentCount = 600;
+    public float MoveSpeed = 60;
+    public float TurnSpeed = 2;
+    public float DiffuseSpeed = 15;
+    public float EvaporateStrength = 0.8f;
+
+    [Header("Sensor")]
+    public float SensorSpacingRad = 0.25f;
+    public float SensorOffsetDistance = 5;
+    public int SensorSize = 1;
+
+    [Header("Styles")]
+    public Color AgentColor = Color.white;
 
     [Header("Canvas Size")]
     public int Width = 320;
@@ -28,7 +39,7 @@ public class SlimeController : MonoBehaviour
 
     // Private fields
     private int MoveKernel;
-    private int EvaporateKernel;
+    private int ProcessKernel;
     private ComputeBuffer Buffer;
     private Agent[] Agents;
 
@@ -39,7 +50,7 @@ public class SlimeController : MonoBehaviour
     {
         // Getting the kernel handle
         MoveKernel = Shader.FindKernel("Move");
-        EvaporateKernel = Shader.FindKernel("Evaporate");
+        ProcessKernel = Shader.FindKernel("Process");
 
         // Creating the texture
         Textures = new DoubleRenderBuffer(Width, Height);
@@ -47,16 +58,26 @@ public class SlimeController : MonoBehaviour
         // Creating the agent buffer
         Buffer = new ComputeBuffer(AgentCount, Agent.Size);
         Agents = new Agent[AgentCount];
-        
-        Vector2 center = new Vector2(Width / 2, Height / 2);
+
+        Vector2 center = new Vector2(Width / 2f, Height / 2f);
+        float radius = Height / 2f;
 
         for (int i = 0; i < AgentCount; i++)
         {
-            // The agents will be centered on the screen with a random angle
+            // Random point inside unit circle, scaled to your desired radius
+            float angle = Random.Range(0f, Mathf.PI * 2f);
+            float r = radius * Mathf.Sqrt(Random.value);
+
+            Vector2 dir = new Vector2(Mathf.Cos(angle), Mathf.Sin(angle));
+            Vector2 pos = center + dir * r;
+
+            // Face outward or inward
+            float facingAngle = (i % 2 == 0) ? angle + Mathf.PI : angle;
+
             Agents[i] = new Agent()
             {
-                Position = center,
-                Angle = Random.Range(0f, Mathf.PI * 2f)
+                Position = pos,
+                Angle = facingAngle
             };
         }
 
@@ -73,18 +94,24 @@ public class SlimeController : MonoBehaviour
         Shader.SetInt("width", Width);
         Shader.SetInt("height", Height);
         Shader.SetInt("agentCount", AgentCount);
+        Shader.SetInt("sensorSize", SensorSize);
         Shader.SetFloat("moveSpeed", MoveSpeed);
-        Shader.SetFloat("evaporateSpeed", EvaporateSpeed);
+        Shader.SetFloat("diffuseSpeed", DiffuseSpeed);
+        Shader.SetFloat("turnSpeed", TurnSpeed);
+        Shader.SetFloat("evaporateStrength", EvaporateStrength);
+        Shader.SetFloat("sensorSpacing", SensorSpacingRad);
+        Shader.SetFloat("sensorOffsetDistance", SensorOffsetDistance);
         Shader.SetFloat("deltaTime", Time.deltaTime);
+        Shader.SetVector("agentColor", ColorToVec(AgentColor));
 
         // Agent move pass
         Shader.SetTexture(MoveKernel, "Result", Textures.Write);
         Shader.Dispatch(MoveKernel, Mathf.CeilToInt(AgentCount / 16f), 1, 1);
 
         // Evaporate pass
-        Shader.SetTexture(EvaporateKernel, "Result", Textures.Write);
-        Shader.SetTexture(EvaporateKernel, "Evaporated", Textures.Read);
-        Shader.Dispatch(EvaporateKernel, Mathf.CeilToInt(Width / 8f), Mathf.CeilToInt(Height / 8f), 1);
+        Shader.SetTexture(ProcessKernel, "Result", Textures.Write);
+        Shader.SetTexture(ProcessKernel, "Processed", Textures.Read);
+        Shader.Dispatch(ProcessKernel, Mathf.CeilToInt(Width / 8f), Mathf.CeilToInt(Height / 8f), 1);
 
         // Swapping the textures, so that the processed texture becomes the input for the next frame
         Textures.Swap();
@@ -97,4 +124,6 @@ public class SlimeController : MonoBehaviour
         Buffer.Dispose();
         Textures.Dispose();
     }
+
+    private static Vector4 ColorToVec(Color color) => new Vector4(color.r, color.g, color.b, color.a);
 }

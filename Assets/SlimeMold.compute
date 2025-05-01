@@ -1,17 +1,26 @@
 // Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel Move
-#pragma kernel Evaporate
+#pragma kernel Process
 
 #define RAND_MAX 4294967295.0
 #define PI 3.14159
+#define ONE_THIRD 1.0 / 3.0
 
 int width;
 int height;
 float deltaTime;
 
-int agentCount;
 float moveSpeed;
-float evaporateSpeed;
+float turnSpeed;
+float evaporateStrength;
+float diffuseSpeed;
+
+int agentCount;
+float4 agentColor;
+
+float sensorSpacing;
+float sensorOffsetDistance;
+int sensorSize;
 
 struct Agent
 {
@@ -20,7 +29,7 @@ struct Agent
 };
 
 RWTexture2D<float4> Result;
-RWTexture2D<float4> Evaporated;
+RWTexture2D<float4> Processed;
 RWStructuredBuffer<Agent> Agents;
 
 uint hash(uint state)
@@ -39,17 +48,72 @@ float random(float2 co)
     return frac(sin(dot(co, float2(12.9898, 78.233))) * 43758.5453);
 }
 
+float senseTrail(Agent agent, float sensorAngleOffset)
+{
+    float sensorAngle = agent.Angle + sensorAngleOffset;
+    float2 sensorDir = float2(cos(sensorAngle), sin(sensorAngle));
+    int2 sensorCentre = agent.Position + sensorDir * sensorOffsetDistance;
+    
+    float value = 0.0;
+    for (int dy = -sensorSize; dy <= sensorSize; dy++)
+    {
+        for (int dx = -sensorSize; dx <= sensorSize; dx++)
+        {
+            int2 sample = int2(sensorCentre.x + dx, sensorCentre.y + dy);
+            
+            if (sample.x >= 0 && sample.x < width && sample.y >= 0 && sample.y < height)
+            {
+                // Average value over all channels
+                value += Result[sample].x;
+            }
+        }
+    }
+
+    return value;
+}
+
 [numthreads(16,1,1)]
 void Move (uint3 id : SV_DispatchThreadID)
 {
-    if (id.x > (uint)agentCount)
+    if (id.x >= (uint)agentCount)
     {
         return;
     }
     
     Agent agent = Agents[id.x];
+    
+    // Generating random values
+    float randomValue = random(float2(agent.Position.xy + deltaTime * id.x));
+    float angleRandom = (randomValue - 0.5) * 2.0 * PI;
+
+    // Turning based on trail sensing
+    float weightLeft = senseTrail(agent, sensorSpacing * PI);
+    float weightForward = senseTrail(agent, 0);
+    float weightRight = senseTrail(agent, -sensorSpacing * PI);
+    
+    float steerStrength = turnSpeed * 2.0 * PI;
+
+    if (weightForward > weightLeft && weightForward > weightRight)
+    {
+    // Go straight
+    }
+    else if (weightForward < weightLeft && weightForward < weightRight)
+    {
+        Agents[id.x].Angle += (randomValue - 0.5) * 2.0 * steerStrength * deltaTime;
+    }
+    else if (weightLeft > weightRight)
+    {
+        Agents[id.x].Angle += randomValue * steerStrength * deltaTime;
+    }
+    else if (weightRight > weightLeft)
+    {
+        Agents[id.x].Angle -= randomValue * steerStrength * deltaTime;
+    }
 
     
+    agent = Agents[id.x];
+    
+    // Moving the agent
     float2 direction = float2(cos(agent.Angle), sin(agent.Angle));
     float2 newPosition = agent.Position + direction * moveSpeed * deltaTime;
     
@@ -59,20 +123,53 @@ void Move (uint3 id : SV_DispatchThreadID)
         newPosition.x = clamp(newPosition.x, 0, width - 1.1);
         newPosition.y = clamp(newPosition.y, 0, height - 1.1);
         
-        float angleRand = random(float2(agent.Position.xy + deltaTime * id.x));
-        Agents[id.x].Angle = angleRand * 2.0 * PI;
+        // Choose a new random direction
+        Agents[id.x].Angle = angleRandom * 2.0 * PI;
     }
     
     Agents[id.x].Position = newPosition;
     
-    Result[int2(newPosition.x, newPosition.y)] = float4(1.0, 1.0, 1.0, 1.0);
+    Result[int2(newPosition.x, newPosition.y)] = agentColor;
 }
 
-[numthreads(8,8,1)]
-void Evaporate(uint3 id : SV_DispatchThreadID)
+[numthreads(8, 8, 1)]
+void Process(uint3 id : SV_DispatchThreadID)
 {
+    if (id.x >= (uint) width || id.y >= (uint) height)
+    {
+        return;
+    }
+
     float4 originalValue = Result[id.xy];
-    float4 evaporatedValue = max(0, originalValue - evaporateSpeed * deltaTime);
-    evaporatedValue.w = 1.0;
-    Evaporated[id.xy] = evaporatedValue;
+
+    // --- Blurring with 3x3 kernel ---
+    float4 sum = 0;
+    int count = 0;
+
+    for (int dy = -1; dy <= 1; dy++)
+    {
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            int x = id.x + dx;
+            int y = id.y + dy;
+
+            if (x >= 0 && x < width && y >= 0 && y < height)
+            {
+                sum += Result[int2(x, y)];
+                count++;
+            }
+        }
+    }
+
+    float4 blurredValue = sum / count;
+
+    //blurredValue.rgb *= evaporateStrength;
+
+    // Blend blurred with current value
+    float4 mixedValue = lerp(originalValue, blurredValue, diffuseSpeed * deltaTime);
+    mixedValue = max(0, mixedValue - evaporateStrength * deltaTime);
+    mixedValue.a = 1.0;
+    
+    Processed[id.xy] = mixedValue;
 }
+
