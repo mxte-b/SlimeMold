@@ -1,6 +1,7 @@
 // Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel Move
 #pragma kernel Process
+#pragma kernel Colorize
 
 #define RAND_MAX 4294967295.0
 #define PI 3.14159
@@ -16,7 +17,8 @@ float evaporateStrength;
 float diffuseSpeed;
 
 int agentCount;
-float4 agentColor;
+float4 highColor;
+float4 lowColor;
 
 float sensorSpacing;
 float sensorOffsetDistance;
@@ -30,6 +32,7 @@ struct Agent
 
 RWTexture2D<float4> Result;
 RWTexture2D<float4> Processed;
+RWTexture2D<float4> Colorized;
 RWStructuredBuffer<Agent> Agents;
 
 uint hash(uint state)
@@ -64,7 +67,7 @@ float senseTrail(Agent agent, float sensorAngleOffset)
             if (sample.x >= 0 && sample.x < width && sample.y >= 0 && sample.y < height)
             {
                 // Average value over all channels
-                value += Result[sample].x;
+                value += dot(Result[sample], float4(1, 1, 1, 1));
             }
         }
     }
@@ -129,7 +132,7 @@ void Move (uint3 id : SV_DispatchThreadID)
     
     Agents[id.x].Position = newPosition;
     
-    Result[int2(newPosition.x, newPosition.y)] = agentColor;
+    Result[int2(newPosition.x, newPosition.y)] = float4(1, 1, 1, 1);
 }
 
 [numthreads(8, 8, 1)]
@@ -163,13 +166,45 @@ void Process(uint3 id : SV_DispatchThreadID)
 
     float4 blurredValue = sum / count;
 
+    // Evaporation method 1
     //blurredValue.rgb *= evaporateStrength;
 
     // Blend blurred with current value
     float4 mixedValue = lerp(originalValue, blurredValue, diffuseSpeed * deltaTime);
+    
+    // Evaporation method 2
     mixedValue = max(0, mixedValue - evaporateStrength * deltaTime);
+    
+    // Set alpha to 1.0
     mixedValue.a = 1.0;
     
     Processed[id.xy] = mixedValue;
 }
 
+[numthreads(8, 8, 1)]
+void Colorize(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint) width || id.y >= (uint) height)
+    {
+        return;
+    }
+
+    float4 originalValue = Processed[id.xy];
+    
+    float intensity = dot(originalValue.rgb, float3(0.5, 0.5, 0.5));
+    float4 finalColor;
+    
+    // 3-point gradient
+    if (intensity < 0.5)
+    {
+        float t = intensity * 2.0;
+        finalColor = lerp(float4(0, 0, 0, 1), lowColor, t);
+    }
+    else
+    {
+        float t = (intensity - 0.5) * 2.0;
+        finalColor = lerp(lowColor, highColor, t);
+    }
+    
+    Colorized[id.xy] = finalColor;
+}

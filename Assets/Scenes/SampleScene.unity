@@ -443,13 +443,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 57ad65988e437c540885df8d8bc521df, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  AgentCount: 600
-  MoveSpeed: 60
-  DiffuseSpeed: 10
-  EvaporateStrength: 0.8
-  AgentColor: {r: 1, g: 1, b: 1, a: 1}
-  Width: 320
-  Height: 200
+  AgentCount: 1000000
+  MoveSpeed: 78.5
+  TurnSpeed: 7.93
+  DiffuseSpeed: 17.1
+  EvaporateStrength: 0.97
+  SensorSpacingRad: 0.35
+  SensorOffsetDistance: 18.46
+  SensorSize: 1
+  HighColor: {r: 1, g: 0.47875565, b: 0.033018887, a: 1}
+  LowColor: {r: 0.34117648, g: 0.0030035966, b: 0, a: 1}
+  Width: 1920
+  Height: 1080
   Shader: {fileID: 7200000, guid: 789c64472cda35a46b769cc36a73cdec, type: 3}
   Image: {fileID: 142934889}
 --- !u!4 &1423699829

@@ -19,7 +19,8 @@ public class SlimeController : MonoBehaviour
     public int SensorSize = 1;
 
     [Header("Styles")]
-    public Color AgentColor = Color.white;
+    public Color HighColor = Color.red;
+    public Color LowColor = Color.green;
 
     [Header("Canvas Size")]
     public int Width = 320;
@@ -40,10 +41,12 @@ public class SlimeController : MonoBehaviour
     // Private fields
     private int MoveKernel;
     private int ProcessKernel;
+    private int ColorizeKernel;
     private ComputeBuffer Buffer;
     private Agent[] Agents;
 
     private DoubleRenderBuffer Textures;
+    private RenderTexture DisplayTexture;
 
     // Start is called before the first frame update
     void Start()
@@ -51,9 +54,11 @@ public class SlimeController : MonoBehaviour
         // Getting the kernel handle
         MoveKernel = Shader.FindKernel("Move");
         ProcessKernel = Shader.FindKernel("Process");
+        ColorizeKernel = Shader.FindKernel("Colorize");
 
-        // Creating the texture
+        // Creating the textures
         Textures = new DoubleRenderBuffer(Width, Height);
+        DisplayTexture = CreateTexture();
 
         // Creating the agent buffer
         Buffer = new ComputeBuffer(AgentCount, Agent.Size);
@@ -64,7 +69,6 @@ public class SlimeController : MonoBehaviour
 
         for (int i = 0; i < AgentCount; i++)
         {
-            // Random point inside unit circle, scaled to your desired radius
             float angle = Random.Range(0f, Mathf.PI * 2f);
             float r = radius * Mathf.Sqrt(Random.value);
 
@@ -85,6 +89,7 @@ public class SlimeController : MonoBehaviour
 
         // Assinging the buffer and texture to the shader
         Shader.SetBuffer(MoveKernel, "Agents", Buffer);
+        Shader.SetTexture(ColorizeKernel, "Colorized", DisplayTexture);
     }
 
     // Update is called once per frame
@@ -102,21 +107,26 @@ public class SlimeController : MonoBehaviour
         Shader.SetFloat("sensorSpacing", SensorSpacingRad);
         Shader.SetFloat("sensorOffsetDistance", SensorOffsetDistance);
         Shader.SetFloat("deltaTime", Time.deltaTime);
-        Shader.SetVector("agentColor", ColorToVec(AgentColor));
+        Shader.SetVector("highColor", ColorToVec(HighColor));
+        Shader.SetVector("lowColor", ColorToVec(LowColor));
 
         // Agent move pass
-        Shader.SetTexture(MoveKernel, "Result", Textures.Write);
+        Shader.SetTexture(MoveKernel, "Result", Textures.Read);
         Shader.Dispatch(MoveKernel, Mathf.CeilToInt(AgentCount / 16f), 1, 1);
 
         // Evaporate pass
-        Shader.SetTexture(ProcessKernel, "Result", Textures.Write);
-        Shader.SetTexture(ProcessKernel, "Processed", Textures.Read);
+        Shader.SetTexture(ProcessKernel, "Result", Textures.Read);
+        Shader.SetTexture(ProcessKernel, "Processed", Textures.Write);
         Shader.Dispatch(ProcessKernel, Mathf.CeilToInt(Width / 8f), Mathf.CeilToInt(Height / 8f), 1);
+
+        // Color pass
+        Shader.SetTexture(ColorizeKernel, "Processed", Textures.Write);
+        Shader.Dispatch(ColorizeKernel, Mathf.CeilToInt(Width / 8f), Mathf.CeilToInt(Height / 8f), 1);
 
         // Swapping the textures, so that the processed texture becomes the input for the next frame
         Textures.Swap();
 
-        Image.texture = Textures.Read;
+        Image.texture = DisplayTexture;
     }
 
     private void OnDestroy()
@@ -126,4 +136,14 @@ public class SlimeController : MonoBehaviour
     }
 
     private static Vector4 ColorToVec(Color color) => new Vector4(color.r, color.g, color.b, color.a);
+
+    private RenderTexture CreateTexture()
+    {
+        RenderTexture texture = new RenderTexture(Width, Height, 0, RenderTextureFormat.ARGBFloat);
+        texture.filterMode = FilterMode.Point;
+        texture.enableRandomWrite = true;
+        texture.Create();
+
+        return texture;
+    }
 }
